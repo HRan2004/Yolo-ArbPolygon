@@ -518,7 +518,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
-        print(mosaic)
         if mosaic:
             # Load mosaic
             img, labels = load_mosaic(self, index)
@@ -543,7 +542,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels = self.labels[index].copy()
             #if labels.size:  # normalized xywh to pixel xyxy format
             #    labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
-            print("labels0:", labels)
             if labels.size:
                 labels[:,1::2] = labels[:,1::2]*ratio[0]*w
                 labels[:,2::2] = labels[:,2::2]*ratio[1]*h
@@ -706,9 +704,6 @@ def load_mosaic(self, index):
             labels[:, 1::2] = labels[:, 1::2]*w+padw
             labels[:, 2::2] = labels[:, 2::2]*h+padh
         labels4.append(labels)
-
-        print(i)
-        print(labels)
 
     # Concat/clip labels
     labels4 = np.concatenate(labels4, 0)

@@ -54,12 +54,19 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
     return filtfilt(b, a, data)  # forward-backward filter
 
 
-def plot_one_box(x, img, color=None, label=None, line_thickness=3):
+def plot_one_box(x, img, color=None, label=None, line_thickness=3, edges=4):
     # Plots one bounding box on image img
     tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
     color = color or [random.randint(0, 255) for _ in range(3)]
-    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    c1, c2 =  (int(x[0::2].min()),int(x[1::2].min())), (int(x[0::2].max()),int(x[1::2].max()))
     cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    for i in range(edges):
+        pt1 = (int(x[i*2]),int(x[i*2+1]))
+        if i!=edges-1:
+            pt2 = (int(x[i*2+2]),int(x[i*2+3]))
+        else:
+            pt2 = (int(x[0]),int(x[1]))
+        cv2.line(img,pt1,pt2,color,thickness=tl, lineType=cv2.LINE_AA)
     if label:
         tf = max(tl - 1, 1)  # font thickness
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
@@ -111,7 +118,7 @@ def output_to_target(output):
     return np.array(targets)
 
 
-def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=640, max_subplots=16):
+def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=640, max_subplots=16, edges=4):
     # Plot image grid with labels
 
     if isinstance(images, torch.Tensor):
@@ -151,26 +158,26 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
         if len(targets) > 0:
             image_targets = targets[targets[:, 0] == i]
-            boxes = xywh2xyxy(image_targets[:, 2:6]).T
+            boxes = image_targets[:, 2:10].T
             classes = image_targets[:, 1].astype('int')
-            labels = image_targets.shape[1] == 6  # labels if no conf column
-            conf = None if labels else image_targets[:, 6]  # check for confidence presence (label vs pred)
+            labels = image_targets.shape[1] == edges*2+2  # labels if no conf column
+            conf = None if labels else image_targets[:, edges*2+2]  # check for confidence presence (label vs pred)
 
             if boxes.shape[1]:
                 if boxes.max() <= 1.01:  # if normalized with tolerance 0.01
-                    boxes[[0, 2]] *= w  # scale to pixels
-                    boxes[[1, 3]] *= h
+                    boxes[0::2] *= w  # scale to pixels
+                    boxes[1::2] *= h
                 elif scale_factor < 1:  # absolute coords need scale if image scales
                     boxes *= scale_factor
-            boxes[[0, 2]] += block_x
-            boxes[[1, 3]] += block_y
+            boxes[0::2] += block_x
+            boxes[1::2] += block_y
             for j, box in enumerate(boxes.T):
                 cls = int(classes[j])
                 color = colors[cls % len(colors)]
-                cls = names[cls] if names else cls
+                clss = names[cls] if names else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
-                    label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
-                    plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl)
+                    label = '%s' % clss if labels else '%s %.1f' % (clss, conf[j])
+                    plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl, edges=edges)
 
         # Draw image filename labels
         if paths:
