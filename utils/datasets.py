@@ -446,6 +446,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             pbar.close()
             
     def cache_labels(self, path=Path('./labels.cache'), prefix=''):
+        edges = self.hyp['edges']
         # Cache dataset labels, check images and read shapes
         x = {}  # dict
         nm, nf, ne, nc = 0, 0, 0, 0  # number missing, found, empty, duplicate
@@ -457,7 +458,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 im.verify()  # PIL verify
                 shape = exif_size(im)  # image size
                 segments = []  # instance segments
-                assert (shape[0] > 9) & (shape[1] > 9), f'image size {shape} <10 pixels'
+                assert (shape[0] > edges*2+1) & (shape[1] > edges*2+1), f'image size {shape} <10 pixels'
                 assert im.format.lower() in img_formats, f'invalid image format {im.format}'
 
                 # verify labels
@@ -466,23 +467,23 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     with open(lb_file, 'r') as f:
                         lines = f.read().strip().splitlines()
                         l = [x.split() for x in lines]
-                        if any([len(x) > 8 for x in l]):  # is segment
-                            classes = np.array([x[0] for x in l], dtype=np.float32)
-                            segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in l]  # (cls, xy1...)
-                            l = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
-                        print("A2:",l)
+                        #if any([len(x) > 8 for x in l]):  # is segment
+                        #    print("is segment")
+                        #    classes = np.array([x[0] for x in l], dtype=np.float32)
+                        #    segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in l]  # (cls, xy1...)
+                        #    l = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
                         l = np.array(l, dtype=np.float32)
                     if len(l):
-                        assert l.shape[1] == 9, 'labels require 5 columns each'
+                        assert l.shape[1] == edges*2+1, 'labels require num columns each'
                         assert (l >= 0).all(), 'negative labels'
                         assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels'
                         assert np.unique(l, axis=0).shape[0] == l.shape[0], 'duplicate labels'
                     else:
                         ne += 1  # label empty
-                        l = np.zeros((0, 5), dtype=np.float32)
+                        l = np.zeros((0, edges*2+1), dtype=np.float32)
                 else:
                     nm += 1  # label missing
-                    l = np.zeros((0, 5), dtype=np.float32)
+                    l = np.zeros((0, edges*2+1), dtype=np.float32)
                 x[im_file] = [l, shape, segments]
             except Exception as e:
                 nc += 1
@@ -513,9 +514,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
+        edges = self.hyp['edges']
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
+        print(mosaic)
         if mosaic:
             # Load mosaic
             img, labels = load_mosaic(self, index)
@@ -538,8 +541,12 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             labels = self.labels[index].copy()
-            if labels.size:  # normalized xywh to pixel xyxy format
-                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+            #if labels.size:  # normalized xywh to pixel xyxy format
+            #    labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+            print("labels0:", labels)
+            if labels.size:
+                labels[:,1::2] = labels[:,1::2]*ratio[0]*w
+                labels[:,2::2] = labels[:,2::2]*ratio[1]*h
 
         if self.augment:
             # Augment imagespace
@@ -559,25 +566,24 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             #     labels = cutout(img, labels)
 
         nL = len(labels)  # number of labels
-        #if nL:
-        #    labels[:, 1:5] = labels[:, 1:5]  # convert xyxy to xywh
-        #    labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
-        #    labels[:, [1, 3]] /= img.shape[1]  # normalized width 0-1
-
+        if nL:
+            # labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])  # convert xyxy to xywh
+            labels[:, 2::2] /= img.shape[0]  # normalized height 0-1
+            labels[:, 1::2] /= img.shape[1]  # normalized width 0-1
         if self.augment:
             # flip up-down
             if random.random() < hyp['flipud']:
                 img = np.flipud(img)
                 if nL:
-                    labels[:, 2] = 1 - labels[:, 2]
+                    labels[:, 2::2] = 1 - labels[:, 2::2]
 
             # flip left-right
             if random.random() < hyp['fliplr']:
                 img = np.fliplr(img)
                 if nL:
-                    labels[:, 1] = 1 - labels[:, 1]
+                    labels[:, 1::2] = 1 - labels[:, 1::2]
 
-        labels_out = torch.zeros((nL, 10))
+        labels_out = torch.zeros((nL, 2*edges+2))
         if nL:
             labels_out[:, 1:] = torch.from_numpy(labels)
 
@@ -695,12 +701,14 @@ def load_mosaic(self, index):
         padh = y1a - y1b
 
         # Labels
-        labels, segments = self.labels[index].copy(), self.segments[index].copy()
+        labels = self.labels[index].copy()
         if labels.size:
-            labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
-            segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
+            labels[:, 1::2] = labels[:, 1::2]*w+padw
+            labels[:, 2::2] = labels[:, 2::2]*h+padh
         labels4.append(labels)
-        segments4.extend(segments)
+
+        print(i)
+        print(labels)
 
     # Concat/clip labels
     labels4 = np.concatenate(labels4, 0)
