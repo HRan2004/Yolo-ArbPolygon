@@ -17,6 +17,10 @@ import torch
 import torchvision
 import yaml
 
+import shapely
+from shapely.geometry import Polygon, MultiPoint  # 多边形
+import math
+
 from utils.google_utils import gsutil_getsize
 from utils.metrics import fitness
 from utils.torch_utils import init_torch_seeds
@@ -333,8 +337,40 @@ def clip_coords(boxes, img_shape):
     boxes[:, 2].clamp_(0, img_shape[1])  # x2
     boxes[:, 3].clamp_(0, img_shape[0])  # y2
 
-def poly_iou(box1,box2):
-    pass
+def polys_iou(poly1s,poly2s):
+    if poly1s.shape[0]!=poly2s.shape[0]:
+        print("ERROR: Need the same len of polygons")
+        return 0
+    ious = []
+    for i in range(poly1s.shape[0]):
+        ious.append(poly_iou(
+            torch.index_select(poly1s,0,torch.tensor([i])).squeeze(0),
+            torch.index_select(poly2s,0,torch.tensor([i])).squeeze(0)))
+    return ious
+
+
+def poly_iou(poly1, poly2):
+    print(poly1)
+    a = np.array(poly1).reshape(len(poly1) // 2, 2)
+    poly1 = Polygon(a).convex_hull
+
+    b = np.array(poly2).reshape(len(poly2) // 2, 2)
+    poly2 = Polygon(b).convex_hull
+
+    union_poly = np.concatenate((a, b))
+    if not poly1.intersects(poly2):
+        iou = 0
+    else:
+        try:
+            inter_area = poly1.intersection(poly2).area  # 相交面积
+            union_area = poly1.area + poly2.area - inter_area  # 两四边形并集，第二种常见算法
+
+            if union_area == 0:
+                iou = 0
+            iou = float(inter_area) / union_area
+        except shapely.geos.TopologicalError:
+            iou = 0
+    return iou
 
 def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
     # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
