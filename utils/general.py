@@ -337,20 +337,35 @@ def clip_coords(boxes, img_shape):
     boxes[:, 2].clamp_(0, img_shape[1])  # x2
     boxes[:, 3].clamp_(0, img_shape[0])  # y2
 
-def polys_iou(poly1s,poly2s):
-    if poly1s.shape[0]!=poly2s.shape[0]:
+def path2xywh(gpath,box=False):
+    if(gpath.shape[0]!=0 and (not box)):
+        gxy = torch.cat(
+            (gpath[:, ::2].min(1).values.unsqueeze(1), gpath[:, 1::2].min(1).values.unsqueeze(1)), 1)
+        gwh = torch.cat(
+            (gpath[:, ::2].max(1).values.unsqueeze(1) - gpath[:, ::2].min(1).values.unsqueeze(1),
+             gpath[:, 1::2].max(1).values.unsqueeze(1) - gpath[:, 1::2].min(1).values.unsqueeze(1)), 1)
+        gxy += gwh / 2
+    else:
+        gxy = gpath[:,0:2]
+        gwh = gpath[:,2:4]
+    return gxy,gwh
+
+def ppoly_iou(poly1, poly2): # input tensor
+    if poly1.shape[0]!=poly2.shape[0]:
         print("ERROR: Need the same len of polygons")
         return 0
+    device = poly1.device
+    # half bug : cant caculate iou on cuda
+    poly1 = poly1.cpu().detach().numpy()
+    poly2 = poly2.cpu().detach().numpy()
+
     ious = []
-    for i in range(poly1s.shape[0]):
-        ious.append(poly_iou(
-            torch.index_select(poly1s,0,torch.tensor([i])).squeeze(0),
-            torch.index_select(poly2s,0,torch.tensor([i])).squeeze(0)))
-    return ious
+    for i in range(poly1.shape[0]):
+        p = torch.tensor([i]).to(device)
+        ious.append(poly_iou(poly1[p],poly2[p]))
+    return torch.tensor(ious).to(device)
 
-
-def poly_iou(poly1, poly2):
-    print(poly1)
+def poly_iou(poly1, poly2): # need numpy or cpu tensor
     a = np.array(poly1).reshape(len(poly1) // 2, 2)
     poly1 = Polygon(a).convex_hull
 
@@ -362,8 +377,8 @@ def poly_iou(poly1, poly2):
         iou = 0
     else:
         try:
-            inter_area = poly1.intersection(poly2).area  # 相交面积
-            union_area = poly1.area + poly2.area - inter_area  # 两四边形并集，第二种常见算法
+            inter_area = poly1.intersection(poly2).area
+            union_area = poly1.area + poly2.area - inter_area
 
             if union_area == 0:
                 iou = 0
@@ -450,13 +465,23 @@ def wh_iou(wh1, wh2):
     return inter / (wh1.prod(2) + wh2.prod(2) - inter)  # iou = inter / (area1 + area2 - inter)
 
 
-def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False,
+def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, edges=2, classes=None, agnostic=False, multi_label=False,
                         labels=()):
     """Runs Non-Maximum Suppression (NMS) on inference results
 
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
+
+    if edges!=2:
+        gpath = prediction[:,:,:edges*2]
+        gxy = torch.cat((
+            gpath[:,:, ::2].min(2).values.unsqueeze(2), gpath[:,:, 1::2].min(2).values.unsqueeze(2)), 2)
+        gwh = torch.cat((
+            gpath[:,:, ::2].max(2).values.unsqueeze(2) - gpath[:,:, ::2].min(2).values.unsqueeze(2),
+            gpath[:,:, 1::2].max(2).values.unsqueeze(2) - gpath[:,:, 1::2].min(2).values.unsqueeze(2)), 2)
+        gxy += gwh / 2
+        prediction = torch.cat((gxy,gwh,prediction[:,:,edges*2+1:]),2)
 
     nc = prediction.shape[2] - 5  # number of classes
     xc = prediction[..., 4] > conf_thres  # candidates

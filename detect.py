@@ -6,6 +6,7 @@ import cv2
 import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
+import numpy
 
 from models.experimental import attempt_load
 from utils.datasets import LoadStreams, LoadImages
@@ -70,10 +71,13 @@ def detect(save_img=False):
         # Inference
         t1 = time_synchronized()
         pred = model(img, augment=opt.augment)[0]
+        print("p1:",pred.shape)
+
 
         # Apply NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, edges=4, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
+        print("p2:",len(pred),pred[0].shape)
 
         # Apply Classifier
         if classify:
@@ -148,7 +152,7 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov5s.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='runs/train/exp47/weights/best.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='data/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')

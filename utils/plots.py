@@ -54,11 +54,11 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
     return filtfilt(b, a, data)  # forward-backward filter
 
 
-def plot_one_box(x, img, color=None, label=None, show_label=False, line_thickness=1, edges=4):
+def plot_one_poly(x, img, color=None, label=None, show_label=False, line_thickness=1, edges=4):
     # Plots one bounding box on image img
     tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
     color = color or [random.randint(0, 255) for _ in range(3)]
-    c1, c2 =  (int(x[0::2].min()),int(x[1::2].min())), (int(x[0::2].max()),int(x[1::2].max()))
+    # c1, c2 =  (int(x[0::2].min()),int(x[1::2].min())), (int(x[0::2].max()),int(x[1::2].max()))
     # cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
     for i in range(edges):
         pt1 = (int(x[i*2]),int(x[i*2+1]))
@@ -75,6 +75,18 @@ def plot_one_box(x, img, color=None, label=None, show_label=False, line_thicknes
             cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
             cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
+def plot_one_box(x, img, color=None, label=None, line_thickness=3):
+    # Plots one bounding box on image img
+    tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
+    color = color or [random.randint(0, 255) for _ in range(3)]
+    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    if label:
+        tf = max(tl - 1, 1)  # font thickness
+        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
+        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
 def plot_one_box_PIL(box, img, color=None, label=None, line_thickness=None):
     img = Image.fromarray(img)
@@ -159,7 +171,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
         if len(targets) > 0:
             image_targets = targets[targets[:, 0] == i]
-            boxes = image_targets[:, 2:10].T
+            boxes = image_targets[:, 2:edges*2+2].T
             classes = image_targets[:, 1].astype('int')
             labels = image_targets.shape[1] == edges*2+2  # labels if no conf column
             conf = None if labels else image_targets[:, edges*2+2]  # check for confidence presence (label vs pred)
@@ -178,7 +190,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
                 clss = names[cls] if names else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     label = '%s' % clss if labels else '%s %.1f' % (clss, conf[j])
-                    plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl, edges=edges)
+                    plot_one_poly(box, mosaic, label=label, color=color, line_thickness=tl, edges=edges)
 
         # Draw image filename labels
         if paths:

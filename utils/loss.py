@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from utils.general import bbox_iou
+from utils.general import bbox_iou,ppoly_iou,path2xywh
 from utils.torch_utils import is_parallel
 
 
@@ -124,12 +124,15 @@ class ComputeLoss:
             n = b.shape[0]  # number of targets
             if n:
                 ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
-
                 # Regression
-                pxy = ps[:, :2].sigmoid() * 2. - 0.5
-                pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
-                pbox = torch.cat((pxy, pwh), 1)  # predicted box
-                iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=True, DIoU=True)  # iou(prediction, target)
+                if edges==2:
+                    pxy = ps[:, :2].sigmoid() * 2. - 0.5
+                    pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
+                    pbox = torch.cat((pxy, pwh), 1)  # predicted box
+                    iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=True, DIoU=True)  # iou(prediction, target)
+                else:
+                    pbox = ps[:,:edges*2].sigmoid() * 2. - 0.5
+                    iou = ppoly_iou(pbox,tpath[i])
                 lbox += (1.0 - iou).mean()  # iou loss
 
                 # Objectness
@@ -190,8 +193,11 @@ class ComputeLoss:
                 # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
                 t = t[j]  # filter
 
-                # Offsets  Delete
-                gxy = t[:, 2:4]  # grid xy...
+                # Positions
+                gpath = t[:, 2:2 * edges + 2]
+                gxy, gwh = path2xywh(gpath)
+
+                # Offsets
                 gxi = gain[[2, 3]] - gxy  # inverse
                 j, k = ((gxy % 1. < g) & (gxy > 1.)).T
                 l, m = ((gxi % 1. < g) & (gxi > 1.)).T
@@ -204,14 +210,8 @@ class ComputeLoss:
 
             # Define
             b, c = t[:, :2].long().T  # image, class
-            gpath = t[:, 2:2*edges+2]
-            if gpath.shape[0]==0:
-                gxy = t[:, 2:4]  # grid xy
-                gwh = t[:, 4:6]  # grid wh
-            else:
-                gxy = torch.cat((gpath[:, ::2].min(1).values.unsqueeze(1) , gpath[:,1::2].min(1).values.unsqueeze(1)), 1)
-                gwh = torch.cat((gpath[:, ::2].max(1).values.unsqueeze(1) - gpath[:, ::2].min(1).values.unsqueeze(1),
-                                 gpath[:,1::2].max(1).values.unsqueeze(1) - gpath[:,1::2].min(1).values.unsqueeze(1)), 1)
+            gpath = t[:, 2:2 * edges + 2]
+            gxy, gwh = path2xywh(gpath)
             gij = (gxy - offsets).long()
             gi, gj = gij.T  # grid xy indices
 
@@ -219,7 +219,7 @@ class ComputeLoss:
             a = t[:, 2*edges+2].long()  # anchor indices
             indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
-            tpath.append(gpath)
+            tpath.append(gpath-gij.repeat(1,edges))
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class
 
