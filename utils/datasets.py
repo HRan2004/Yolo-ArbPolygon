@@ -514,7 +514,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
-        edges = self.hyp['edges']
+        edges = self.hyp['edges'] if self.hyp else 4
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
@@ -536,15 +536,15 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            img, ratio, pad, (bx,by) = letterbox(img, shape, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             labels = self.labels[index].copy()
             #if labels.size:  # normalized xywh to pixel xyxy format
             #    labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
             if labels.size:
-                labels[:,1::2] = labels[:,1::2]*ratio[0]*w
-                labels[:,2::2] = labels[:,2::2]*ratio[1]*h
+                labels[:,1::2] = labels[:,1::2]*ratio[0]*w + bx
+                labels[:,2::2] = labels[:,2::2]*ratio[1]*h + by
 
         if self.augment:
             # Augment imagespace
@@ -845,7 +845,7 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
-    return img, ratio, (dw, dh)
+    return img, ratio, (dw, dh), (left,top)
 
 
 def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, scale=.1, shear=10, perspective=0.0,
