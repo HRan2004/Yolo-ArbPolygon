@@ -332,10 +332,8 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
 
 def clip_coords(boxes, img_shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
-    boxes[:, 0].clamp_(0, img_shape[1])  # x1
-    boxes[:, 1].clamp_(0, img_shape[0])  # y1
-    boxes[:, 2].clamp_(0, img_shape[1])  # x2
-    boxes[:, 3].clamp_(0, img_shape[0])  # y2
+    boxes[:, ::2].clamp_(0, img_shape[1])
+    boxes[:, 1::2].clamp_(0, img_shape[0])
 
 def path2xywh(gpath,box=False):
     if(gpath.shape[0]!=0 and (not box)):
@@ -465,7 +463,7 @@ def wh_iou(wh1, wh2):
     return inter / (wh1.prod(2) + wh2.prod(2) - inter)  # iou = inter / (area1 + area2 - inter)
 
 
-def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, edges=2, classes=None, agnostic=False, multi_label=False,
+def non_max_suppression(prediction_source, conf_thres=0.25, iou_thres=0.45, edges=2, classes=None, agnostic=False, multi_label=False,
                         labels=()):
     """Runs Non-Maximum Suppression (NMS) on inference results
 
@@ -473,6 +471,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, edges=2, cl
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
 
+    prediction = prediction_source.detach()
     if edges!=2:
         gpath = prediction[:,:,:edges*2]
         gxy = torch.cat((
@@ -481,7 +480,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, edges=2, cl
             gpath[:,:, ::2].max(2).values.unsqueeze(2) - gpath[:,:, ::2].min(2).values.unsqueeze(2),
             gpath[:,:, 1::2].max(2).values.unsqueeze(2) - gpath[:,:, 1::2].min(2).values.unsqueeze(2)), 2)
         gxy += gwh / 2
-        prediction = torch.cat((gxy,gwh,prediction[:,:,edges*2+1:]),2)
+        prediction = torch.cat((gxy,gwh,prediction[:,:,edges*2:]),2)
 
     nc = prediction.shape[2] - 5  # number of classes
     xc = prediction[..., 4] > conf_thres  # candidates
@@ -647,6 +646,10 @@ def apply_classifier(x, model, img, im0):
 
     return x
 
+def freeze(layer):
+    for child in layer.children():
+        for param in child.parameters():
+            param.requires_grad = False
 
 def increment_path(path, exist_ok=True, sep=''):
     # Increment path, i.e. runs/exp --> runs/exp{sep}0, runs/exp{sep}1 etc.
