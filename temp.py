@@ -4,10 +4,9 @@ from utils.plots import *
 from PIL import Image
 import torch
 
-a = torch.rand((2,3))
+a = torch.ones((2,3))
 print(a)
-b = torch.tensor([2,2,2])
-a*=b
-print(a)
+b = a ** (2 * 2)
+print(b)
 
 
