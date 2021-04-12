@@ -6,7 +6,8 @@ import torch
 
 a = torch.rand((2,3))
 print(a)
-b = a[1].repeat(2)
-print(b)
+b = torch.tensor([2,2,2])
+a*=b
+print(a)
 
 
