@@ -52,8 +52,15 @@ class Detect(nn.Module):
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device).repeat(1,1,1,1,edges)
 
                 y = x[i].sigmoid()
-                y[..., 0:edges*2] = (y[..., 0:edges*2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                # y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+
+                if edges==2:
+                    y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
+                    y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+                elif edges==4:
+                    direction = torch.Tensor([-1,1, 1,1, 1,-1, -1,-1]).to(y.device)
+                    y[..., :8] = ((y[..., :8] * 2) ** 2 * self.anchor_grid[i].repeat(1,1,1,1,1,edges) * direction + self.grid[i]) * self.stride
+                else:
+                    y[..., :edges*2] = ((y[..., :edges*2] * 4 - 2) ** 2 * self.anchor_grid[i] + self.grid[i]) * self.stride
                 z.append(y.view(bs, -1, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)

@@ -4,7 +4,9 @@ from utils.plots import *
 from PIL import Image
 import torch
 
-a = torch.rand((1,3))
-a = a.repeat(1,2)
+a = torch.rand((2,3))
 print(a)
+b = a[1].repeat(2)
+print(b)
+
 

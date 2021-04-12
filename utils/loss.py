@@ -130,8 +130,12 @@ class ComputeLoss:
                     pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
                     pbox = torch.cat((pxy, pwh), 1)  # predicted box
                     iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=True, DIoU=True)  # iou(prediction, target)
+                elif edges==4:
+                    direction = torch.Tensor([-1,1, 1,1, 1,-1, -1,-1]).to(ps.device)
+                    pbox = (ps[:,:8].sigmoid() * 2) ** 2 * anchors[i].repeat(1,4) * direction
+                    iou = ppoly_iou(pbox,tpath[i])
                 else:
-                    pbox = ps[:,:edges*2].sigmoid() * 2. - 0.5
+                    pbox = (ps[:,:edges*2].sigmoid() * 4 - 2) ** 2 * anchors[i].repeat(1,edges)
                     iou = ppoly_iou(pbox,tpath[i])
                 lbox += (1.0 - iou).mean()  # iou loss
 
