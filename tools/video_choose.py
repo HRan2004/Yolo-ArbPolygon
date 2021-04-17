@@ -5,8 +5,8 @@ import sys
 import pygame
 import _thread
 
-video_path = "videos\\0414-1.mp4" # 视频路径
-save_path = "images\\" # 保存路径
+video_path = "J:\\EAC-Datasets\\videos\\0413-1.mp4" # 视频路径
+save_path = "J:\\EAC-Datasets\\images\\" # 保存路径
 
 w_num = 8 # 显示数量
 h_num = 4
@@ -30,15 +30,21 @@ pygame.init()
 screen = pygame.display.set_mode((w_num*pic_w,h_num*pic_h))
 
 imgs = []
+imgs_source = []
 def fresh_images():
     global success
+    global imgs_source
     global imgs
     imgs = []
+    imgs_source = []
     count = 0
     while success:
         success, image = vc.read()
         count += 1
+        if not success:
+            break
         if count % each == 0:
+            imgs_source.append(image)
             image = cv2.resize(image,(pic_w,pic_h))
             imgs.append(image)
             if(len(imgs)>=w_num*h_num):
@@ -76,10 +82,10 @@ while True:
             y = y//pic_h
             pygame.draw.rect(screen,(0,200,100),[x*pic_w,y*pic_h,pic_w,pic_h],3)
             had_save.append([x,y])
-            save_img = imgs[x*h_num+y]
-            name = save_str+str(save_start)+".jpg"
-            cv2.imwrite(save_path+name,save_img)
-            print("保存至图片: "+name)
+            save_img = imgs_source[x*h_num+y]
+            path = save_path + save_str + str(save_start) + ".jpg"
+            cv2.imwrite(path, save_img)
+            print("save: " + path)
             save_start+=1
     pygame.display.flip()
 
