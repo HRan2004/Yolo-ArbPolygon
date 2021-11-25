@@ -2,8 +2,9 @@
 
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
 
-from utils.general import bbox_iou,ppoly_iou,path2xywh
+from utils.general import bbox_iou,ppoly_iou,path2xywh,ppoly_loss_faster
 from utils.torch_utils import is_parallel
 
 
@@ -130,14 +131,21 @@ class ComputeLoss:
                     pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
                     pbox = torch.cat((pxy, pwh), 1)  # predicted box
                     iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=True, DIoU=True)  # iou(prediction, target)
+                    lbox += (1.0 - iou).mean()  # iou loss
                 elif edges==4:
                     direction = torch.Tensor([-1,1, 1,1, 1,-1, -1,-1]).to(ps.device)
                     pbox = (ps[:,:8].sigmoid() * 2) ** 2 * anchors[i].repeat(1,4) * direction
-                    iou = ppoly_iou(pbox,tpath[i])
+                    if self.hyp['fast_loss']:
+                        lb = ppoly_loss_faster(pbox,tpath[i])
+                        lbox += lb.mean()
+                        iou = 1/lb
+                    else:
+                        iou = ppoly_iou(pbox,tpath[i])
+                        lbox += (1.0 - iou).mean()  # iou loss
                 else:
                     pbox = (ps[:,:edges*2].sigmoid() * 4 - 2) ** 2 * anchors[i].repeat(1,edges)
                     iou = ppoly_iou(pbox,tpath[i])
-                lbox += (1.0 - iou).mean()  # iou loss
+                    lbox += (1.0 - iou).mean()  # iou loss
 
                 # Objectness
                 tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
@@ -153,7 +161,7 @@ class ComputeLoss:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
 
             obji = self.BCEobj(pi[..., 2*edges], tobj)
-            lobj += obji * self.balance[i]  # obj loss
+            # lobj += obji * self.balance[i]  # obj loss
             if self.autobalance:
                 self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
 

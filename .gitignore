@@ -252,3 +252,4 @@ crashlytics-build.properties
 fabric.properties
 .dockerignore
 .gitattributes
+desktop-tutorial/

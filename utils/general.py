@@ -348,6 +348,9 @@ def path2xywh(gpath,box=False):
         gwh = gpath[:,2:4]
     return gxy,gwh
 
+def ppoly_loss_faster(poly1,poly2):
+    return torch.sqrt(torch.square(poly2-poly1).sum(1))
+
 def ppoly_iou(poly1, poly2): # input tensor
     if poly1.shape[0]!=poly2.shape[0]:
         print("ERROR: Need the same len of polygons")
@@ -364,26 +367,29 @@ def ppoly_iou(poly1, poly2): # input tensor
     return torch.tensor(ious).to(device)
 
 def poly_iou(poly1, poly2): # need numpy or cpu tensor
-    a = np.array(poly1).reshape(len(poly1) // 2, 2)
-    poly1 = Polygon(a).convex_hull
+    try:
+        a = np.array(poly1).reshape(len(poly1) // 2, 2)
+        poly1 = Polygon(a).convex_hull
 
-    b = np.array(poly2).reshape(len(poly2) // 2, 2)
-    poly2 = Polygon(b).convex_hull
+        b = np.array(poly2).reshape(len(poly2) // 2, 2)
+        poly2 = Polygon(b).convex_hull
 
-    union_poly = np.concatenate((a, b))
-    if not poly1.intersects(poly2):
-        iou = 0
-    else:
-        try:
-            inter_area = poly1.intersection(poly2).area
-            union_area = poly1.area + poly2.area - inter_area
-
-            if union_area == 0:
-                iou = 0
-            iou = float(inter_area) / union_area
-        except shapely.geos.TopologicalError:
+        union_poly = np.concatenate((a, b))
+        if not poly1.intersects(poly2):
             iou = 0
-    return iou
+        else:
+            try:
+                inter_area = poly1.intersection(poly2).area
+                union_area = poly1.area + poly2.area - inter_area
+
+                if union_area == 0:
+                    iou = 0
+                iou = float(inter_area) / union_area
+            except shapely.geos.TopologicalError:
+                iou = 0
+        return iou
+    except:
+        return 0
 
 def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
     # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
