@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
+# 此文件用于转换dota数据集的标签至yolo的格式
+
 imgs_path = "E:\\dota\\train\\images\\"
 labels_source_path = "E:\\dota\\train\\source_labels\\"
 labels_path = "E:\\dota\\train\\labels\\"

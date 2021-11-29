@@ -25,10 +25,12 @@ class Detect(nn.Module):
     stride = None  # strides computed during build
     export = False  # onnx export
 
-    def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
+    def __init__(self, nc=80, anchors=(), ch=(), edges=0, poly_out=0.25):  # detection layer
         super(Detect, self).__init__()
+        self.edges = edges # edges
+        self.poly_out = poly_out # poly_out
         self.nc = nc  # number of classes
-        self.no = nc + 9  # number of outputs per anchor #change
+        self.no = nc + edges*2 + 5  # number of outputs per anchor #change
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
@@ -38,7 +40,6 @@ class Detect(nn.Module):
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
 
     def forward(self, x):
-        edges = 4
         # x = x.copy()  # for profiling
         z = []  # inference output
         self.training |= self.export
@@ -49,18 +50,15 @@ class Detect(nn.Module):
 
             if not self.training:  # inference
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
-                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device).repeat(1,1,1,1,edges)
+                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
 
                 y = x[i].sigmoid()
+                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
+                y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
 
-                if edges==2:
-                    y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
-                    y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
-                elif edges==4:
-                    direction = torch.Tensor([-1,1, 1,1, 1,-1, -1,-1]).to(y.device)
-                    y[..., :8] = ((y[..., :8] * 2) ** 2 * self.anchor_grid[i].repeat(1,1,1,1,1,edges) * direction + self.grid[i]) * self.stride[i]
-                else:
-                    y[..., :edges*2] = ((y[..., :edges*2] * 4 - 2) ** 2 * self.anchor_grid[i].repeat(1,1,1,1,1,edges) + self.grid[i]) * self.stride[i]
+                if self.edges!=0:
+                    y[..., 4:4+self.edges*2] = (y[..., 4:4+self.edges*2] * (1+self.poly_out*2) - self.poly_out)
+
                 z.append(y.view(bs, -1, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)
@@ -72,7 +70,7 @@ class Detect(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
+    def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None, edges=0, poly_out=0.25):  # model, input channels, number of classes
         super(Model, self).__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
@@ -90,7 +88,7 @@ class Model(nn.Module):
         if anchors:
             logger.info(f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)  # override yaml value
-        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
+        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch], edges=edges, poly_out=poly_out)  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
@@ -206,11 +204,11 @@ class Model(nn.Module):
         model_info(self, verbose, img_size)
 
 
-def parse_model(d, ch):  # model_dict, input_channels(3)
+def parse_model(d, ch, edges=0, poly_out=0.25):  # model_dict, input_channels(3)
     logger.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
     na = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors  # number of anchors
-    no = na * (nc + 9)  # number of outputs = anchors * (classes + 5) #change
+    no = na * (nc + edges*2 + 5)  # number of outputs = anchors * (classes + 5) #change
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
@@ -238,6 +236,8 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             c2 = sum([ch[x] for x in f])
         elif m is Detect:
             args.append([ch[x] for x in f])
+            args.append(edges)
+            args.append(poly_out)
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
         elif m is Contract:

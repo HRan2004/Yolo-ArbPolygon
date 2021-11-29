@@ -56,11 +56,12 @@ def exif_size(img):
     return s
 
 
-def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
+def create_dataloader(path, imgsz, batch_size, stride, opt, edges=0, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
                       rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix=''):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
         dataset = LoadImagesAndLabels(path, imgsz, batch_size,
+                                      edges=edges,
                                       augment=augment,  # augment images
                                       hyp=hyp,  # augmentation hyperparameters
                                       rect=rect,  # rectangular training
@@ -339,11 +340,14 @@ def img2label_paths(img_paths):
 
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
-    def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
+    def __init__(self, path, img_size=640, batch_size=16, edges=0, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images=False, single_cls=False, stride=32, pad=0.0, prefix=''):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
+        self.edges = edges
+        if hyp:
+            self.edges = hyp['edges']
         self.image_weights = image_weights
         self.rect = False if image_weights else rect
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
@@ -514,7 +518,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
-        edges = self.hyp['edges'] if self.hyp else 4
+        edges = self.edges
 
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
@@ -588,6 +592,18 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Convert
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
+
+        labels_out = torch.cat((labels_out[:, :2], torch.zeros([labels_out.shape[0], 4], device=labels_out.device), labels_out[:, 2:]),1)
+        if labels_out.shape[0] > 0:
+            txyxy = torch.zeros([labels_out.shape[0], 4], device=labels_out.device)
+            txyxy[:, 0] = torch.clamp(torch.min(labels_out[:, 6:edges * 2 + 6:2], 1).values, 0, 1)
+            txyxy[:, 1] = torch.clamp(torch.min(labels_out[:, 7:edges * 2 + 6:2], 1).values, 0, 1)
+            txyxy[:, 2] = torch.clamp(torch.max(labels_out[:, 6:edges * 2 + 6:2], 1).values, 0, 1)
+            txyxy[:, 3] = torch.clamp(torch.max(labels_out[:, 7:edges * 2 + 6:2], 1).values, 0, 1)
+            labels_out[:, 2] = (txyxy[:, 0] + txyxy[:, 2]) / 2
+            labels_out[:, 3] = (txyxy[:, 1] + txyxy[:, 3]) / 2
+            labels_out[:, 4] = txyxy[:, 2] - txyxy[:, 0]
+            labels_out[:, 5] = txyxy[:, 3] - txyxy[:, 1]
 
         return torch.from_numpy(img), labels_out, self.img_files[index], shapes
 
@@ -707,8 +723,9 @@ def load_mosaic(self, index):
 
     # Concat/clip labels
     labels4 = np.concatenate(labels4, 0)
-    for x in (labels4[:, 1:], *segments4):
-        np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
+    if self.edges==0: # clip polygon will let the shape wrong
+        for x in (labels4[:, 1:], *segments4):
+            np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
     # img4, labels4 = replicate(img4, labels4)  # replicate
 
     # Augment

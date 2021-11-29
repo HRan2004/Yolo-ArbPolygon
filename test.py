@@ -38,8 +38,7 @@ def test(data,
          wandb_logger=None,
          compute_loss=None,
          half_precision=True,
-         is_coco=False,
-         edges=4):
+         is_coco=False):
     # Initialize/load model and set device
     training = model is not None
     if training:  # called by train.py
@@ -75,6 +74,8 @@ def test(data,
             data = yaml.load(f, Loader=yaml.SafeLoader)
     check_dataset(data)  # check
     nc = 1 if single_cls else int(data['nc'])  # number of classes
+    edges = data['edges']
+    ci = edges*2+5 # index of first class in each pred box
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
 
@@ -87,7 +88,7 @@ def test(data,
         if device.type != 'cpu':
             model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
         task = opt.task if opt.task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
-        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, opt,
+        dataloader = create_dataloader(data[task], imgsz, batch_size, gs, opt, edges,
                                        prefix=colorstr(f'{task}: '))[0]
 
     seen = 0
@@ -116,10 +117,10 @@ def test(data,
                 loss += compute_loss([x.float() for x in train_out], targets)[1][:3]  # box, obj, cls
 
             # Run NMS
-            targets[:, 2:] *= torch.Tensor([width, height]).to(device).repeat(edges)  # to pixels
+            targets[:, 2:] *= torch.Tensor([width, height]).to(device).repeat(edges+2)  # to pixels
             lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
             t = time_synchronized()
-            out = non_max_suppression(out, conf_thres=conf_thres, iou_thres=iou_thres,edges=4 , labels=lb, multi_label=True)
+            out = non_max_suppression(out, conf_thres=conf_thres, iou_thres=iou_thres, edges=edges, labels=lb, multi_label=True)
             t1 += time_synchronized() - t
 
         # Statistics per image
@@ -142,7 +143,11 @@ def test(data,
             # Append to text file
             if save_txt:
                 gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
-                for *xyxy, conf, cls in predn.tolist():
+                for pred_single in predn.tolist():
+                    xyxy = pred_single[:4]
+                    poly = pred_single[4:ci-1]
+                    conf = pred_single[:ci-1]
+                    cls = pred_single[:,ci]
                     xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                     line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
                     with open(save_dir / 'labels' / (path.stem + '.txt'), 'a') as f:
@@ -206,14 +211,14 @@ def test(data,
                                     break
 
             # Append statistics (correct, conf, pcls, tcls)
-            stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
+            stats.append((correct.cpu(), pred[:, ci-1].cpu(), pred[:, ci].cpu(), tcls))
 
         # Plot images
         if plots and batch_i < 3:
             f = save_dir / f'test_batch{batch_i}_labels.jpg'  # labels
-            Thread(target=plot_images_poly, args=(img, targets, paths, f, names), daemon=True).start()
+            Thread(target=plot_images_poly, args=(img, targets, paths, f, names, False), daemon=True).start()
             f = save_dir / f'test_batch{batch_i}_pred.jpg'  # predictions
-            Thread(target=plot_images_box, args=(img, output_to_target(out), paths, f, names), daemon=True).start()
+            Thread(target=plot_images_poly, args=(img, output_to_target(out,edges), paths, f, names, False), daemon=True).start()
 
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
@@ -286,12 +291,12 @@ def test(data,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
-    parser.add_argument('--weights', nargs='+', type=str, default='weights/temp1.pt', help='model.pt path(s)')
-    parser.add_argument('--data', type=str, default='data/coco80.yaml', help='*.data path')
+    parser.add_argument('--weights', nargs='+', type=str, default='runs/train/exp2/weights/last.pt', help='model.pt path(s)')
+    parser.add_argument('--data', type=str, default='data/dota16.yaml', help='*.data path')
     parser.add_argument('--batch-size', type=int, default=2, help='size of each image batch')
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
-    parser.add_argument('--conf-thres', type=float, default=0.1, help='object confidence threshold')
-    parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
+    parser.add_argument('--conf-thres', type=float, default=0.05, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.5, help='IOU threshold for NMS')
     parser.add_argument('--task', default='val', help='train, val, test, speed or study')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--single-cls', action='store_true', help='treat as single-class dataset')

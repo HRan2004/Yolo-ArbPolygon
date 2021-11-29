@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import random
-import time
 
 def plot_one_box(x, img, color=None, label=None, line_thickness=4, edges=4):
     # Plots one bounding box on image img
